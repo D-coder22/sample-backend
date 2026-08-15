@@ -11,4 +11,4 @@ class JobsOutput(BaseModel):
 
 
 class JobsOutputCompleted(JobsOutput):
-    result: str
+    result: str | None = None
