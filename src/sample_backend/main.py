@@ -4,7 +4,6 @@ from contextlib import asynccontextmanager
 from hashlib import sha256
 from uuid import uuid4
 
-from config import REDIS_HOST, REDIS_PORT
 from fastapi import (
     BackgroundTasks,
     Depends,
@@ -16,15 +15,8 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader
-from redis.asyncio import Redis
 from schemas import JobsOutput, JobsOutputCompleted, JobsPayload
-
-r = Redis(
-    host=REDIS_HOST,
-    port=REDIS_PORT,
-    decode_responses=True,
-    socket_keepalive=True,
-)
+from services.redis import r
 
 
 @asynccontextmanager
