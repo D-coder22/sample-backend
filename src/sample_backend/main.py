@@ -15,6 +15,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader
+from rate_limit import check_rate_limit
 from schemas import JobsOutput, JobsOutputCompleted, JobsPayload
 from services.redis import r
 
@@ -41,11 +42,12 @@ def verify_token(
         raise HTTPException(status_code=401, detail="Invalid token")
 
 
-def verify_idempotency_key(
+async def verify_idempotency_key(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> str:
     if not idempotency_key:
         raise HTTPException(status_code=400, detail="Missing Idempotency-Key header")
+    await check_rate_limit(idempotency_key)
     return idempotency_key
 
 
