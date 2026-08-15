@@ -41,14 +41,14 @@ app.add_middleware(
 )
 
 
-async def start_job(payload: str, idempotency_key: str, job_id: str) -> None:
+async def start_job(payload: str, job_id: str) -> None:
     await sleep(7)
     payload_hash = sha256(payload).hexdigest()
 
     completed_job = JobsOutputCompleted(
         job_id=job_id, status="completed", result=payload_hash
     )
-    await r.set(f"idem:{idempotency_key}", completed_job.model_dump_json(), ex=86400)
+    await r.set(f"jobs:{job_id}", completed_job.model_dump_json(), ex=86400)
 
 
 @app.post("/api/v1/jobs", status_code=status.HTTP_202_ACCEPTED)
@@ -59,12 +59,13 @@ async def create_job(
     background_tasks: BackgroundTasks,
 ) -> JobsOutput:
 
-    if cached := await r.get(f"jobs:{idempotency_key}"):
-
-        return JobsOutput(**json.load(cached))
+    if job_id := await r.get(f"idemp_keys:{idempotency_key}"):
+        job_data = await r.get(f"jobs:{job_id}")
+        return JobsOutput(**json.load(job_data))
 
     job = JobsOutput(job_id=uuid4().hex, status="pending")
-    await r.set(f"jobs:{idempotency_key}", job.model_dump_json(), ex=86400, nx=True)
+    await r.set(f"idemp_keys:{idempotency_key}", job.job_id, ex=86400, nx=True)
+    await r.set(f"jobs:{job.job_id}", job.model_dump_json(), ex=86400, nx=True)
 
     background_tasks.add_task(
         start_job, input_data.payload, idempotency_key, job.job_id
