@@ -1,7 +1,7 @@
 import json
 from asyncio import sleep
+from contextlib import asynccontextmanager
 from hashlib import sha256
-from typing import Annotated
 from uuid import uuid4
 
 from config import REDIS_HOST, REDIS_PORT
@@ -19,14 +19,27 @@ from fastapi.security import APIKeyHeader
 from redis.asyncio import Redis
 from schemas import JobsOutput, JobsOutputCompleted, JobsPayload
 
-app = FastAPI()
-r = Redis(host=REDIS_HOST, port=REDIS_PORT, decode_responses=True)
+r = Redis(
+    host=REDIS_HOST,
+    port=REDIS_PORT,
+    decode_responses=True,
+    socket_keepalive=True,
+)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await r.ping()
+    yield
+    await r.aclose()
+
+
+app = FastAPI(swagger_ui_parameters={"displayRequestDuration": True}, lifespan=lifespan)
 
 
 def verify_token(
     authorization: str | None = Security(APIKeyHeader(name="Authorization")),
 ) -> None:
-    print(authorization)
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing or bad Bearer token")
 
@@ -39,7 +52,6 @@ def verify_token(
 def verify_idempotency_key(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> str:
-    print(idempotency_key)
     if not idempotency_key:
         raise HTTPException(status_code=400, detail="Missing Idempotency-Key header")
     return idempotency_key
@@ -79,8 +91,10 @@ async def create_job(
         )
 
     job = JobsOutput(job_id=uuid4().hex, status="pending")
-    await r.set(f"idemp_keys:{idempotency_key}", job.job_id, ex=86400, nx=True)
-    await r.set(f"jobs:{job.job_id}", job.model_dump_json(), ex=86400, nx=True)
+    async with r.pipeline(transaction=True) as pipe:
+        pipe.set(f"idemp_keys:{idempotency_key}", job.job_id, ex=86400, nx=True)
+        pipe.set(f"jobs:{job.job_id}", job.model_dump_json(), ex=86400, nx=True)
+        await pipe.execute()
 
     background_tasks.add_task(start_job, input_data.payload, job.job_id)
 
